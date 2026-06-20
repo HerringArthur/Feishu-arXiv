@@ -1,0 +1,83 @@
+name: Paper Analysis (Reading + Deep Note)
+
+on:
+  repository_dispatch:
+    types: [paper_reading]
+
+  workflow_dispatch:
+    inputs:
+      arxiv_url:
+        description: 'Arxiv URL or paper ID'
+        required: true
+        type: string
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Determine paper URL
+        id: paper
+        run: |
+          # From repository_dispatch payload OR workflow_dispatch input
+          if [ -n "${{ github.event.client_payload.arxiv_url }}" ]; then
+            echo "url=${{ github.event.client_payload.arxiv_url }}" >> $GITHUB_OUTPUT
+          elif [ -n "${{ github.event.inputs.arxiv_url }}" ]; then
+            echo "url=${{ github.event.inputs.arxiv_url }}" >> $GITHUB_OUTPUT
+          else
+            echo "No paper URL provided."
+            exit 1
+          fi
+
+      - name: Run paper-reading
+        id: reading
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+          FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
+          FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
+          FEISHU_RECEIVE_ID: ${{ github.event.client_payload.receive_id || '' }}
+        run: |
+          python scripts/reading.py --url "${{ steps.paper.outputs.url }}" > reading_output.json
+          cat reading_output.json
+
+      - name: Check if worth deep reading
+        id: check
+        run: |
+          PRIORITY=$(python -c "
+          import json
+          with open('reading_output.json') as f:
+              text = f.read()
+          # Find JSON object
+          start = text.find('{')
+          end = text.rfind('}') + 1
+          if start >= 0 and end > start:
+              data = json.loads(text[start:end])
+              print(data.get('reading_priority', '可暂缓'))
+          else:
+              print('可暂缓')
+          ")
+          echo "priority=$PRIORITY" >> $GITHUB_OUTPUT
+          echo "Reading priority: $PRIORITY"
+
+      - name: Run deep-note (if worth it)
+        if: steps.check.outputs.priority == '值得精读'
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+        run: |
+          echo "📝 Generating deep note..."
+          python scripts/deep_note.py --from-reading reading_output.json

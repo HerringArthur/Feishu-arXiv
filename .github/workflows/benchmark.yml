@@ -1,0 +1,48 @@
+name: Benchmark Extractor
+
+on:
+  workflow_dispatch:
+    inputs:
+      urls:
+        description: 'Arxiv URLs or IDs (comma-separated)'
+        required: true
+        type: string
+      task:
+        description: 'Target task name (e.g. GSM8K)'
+        required: false
+        type: string
+        default: ''
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run benchmark extraction
+        env:
+          LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
+          LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
+          LLM_MODEL: ${{ secrets.LLM_MODEL }}
+        run: |
+          TASK_ARG=""
+          if [ -n "${{ github.event.inputs.task }}" ]; then
+            TASK_ARG="--task ${{ github.event.inputs.task }}"
+          fi
+          python scripts/benchmark.py --urls "${{ github.event.inputs.urls }}" $TASK_ARG
+
+      - name: Upload result
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-result
+          path: output/benchmark_*.md

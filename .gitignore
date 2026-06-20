@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+
+# Secrets — never commit
+secrets.json
+*.secret
+
+# Cloudflare
+cloudflare-worker/.wrangler/
+cloudflare-worker/node_modules/
