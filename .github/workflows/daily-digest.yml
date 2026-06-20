@@ -2,7 +2,6 @@ name: Daily Arxiv Digest
 
 on:
   schedule:
-    # UTC 22:00 = 北京时间 06:00 (UTC+8)
     - cron: '0 22 * * *'
   workflow_dispatch:
     inputs:
@@ -27,18 +26,14 @@ jobs:
   digest:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-
     steps:
       - uses: actions/checkout@v4
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
       - name: Install dependencies
         run: pip install -r requirements.txt
-
       - name: Run digest
         env:
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
@@ -46,18 +41,8 @@ jobs:
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
         run: |
-          ARGS=""
-          if [ -n "${{ github.event.inputs.categories }}" ]; then
-            ARGS="$ARGS --categories ${{ github.event.inputs.categories }}"
-          fi
-          if [ -n "${{ github.event.inputs.keywords }}" ]; then
-            ARGS="$ARGS --keywords ${{ github.event.inputs.keywords }}"
-          fi
-          if [ -n "${{ github.event.inputs.threshold }}" ]; then
-            ARGS="$ARGS --threshold ${{ github.event.inputs.threshold }}"
-          fi
-          if [ -n "${{ github.event.inputs.lookback }}" ]; then
-            ARGS="$ARGS --lookback ${{ github.event.inputs.lookback }}"
-          fi
-
-          python scripts/digest.py $ARGS
+          python scripts/digest.py \
+            --categories "${{ github.event.inputs.categories || 'cs.CL,cs.AI,cs.LG' }}" \
+            --keywords "${{ github.event.inputs.keywords || '' }}" \
+            --threshold "${{ github.event.inputs.threshold || '0.75' }}" \
+            --lookback "${{ github.event.inputs.lookback || '1' }}"
