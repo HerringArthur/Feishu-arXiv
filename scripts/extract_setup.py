@@ -1,7 +1,7 @@
 """
 experiment-setup: 单篇论文的实验配置 / 复现要素抽取
 
-传入 arxiv 链接，OCR 全文后抽取：数据集、超参、模型规模、训练硬件、评测协议、消融、复现要点。
+传入 arxiv 链接，解析论文前若干页后抽取：数据集、超参、模型规模、训练硬件、评测协议、消融、复现要点。
 与 reading.py（整体精读）、benchmark.py（多篇对比）互补，只聚焦"实验配置"。
 
 Usage:
@@ -27,7 +27,7 @@ SETUP_SYSTEM_PROMPT = load_prompt("experiment_setup")
 
 
 def extract_setup(paper: dict, ocr_evidence: dict = None, model: str = None) -> dict:
-    """从论文（优先 OCR 全文）抽取结构化实验配置。"""
+    """从论文（优先 MinerU 文档解析）抽取结构化实验配置。"""
     if not model:
         model = get_llm_model()
 
@@ -38,7 +38,7 @@ def extract_setup(paper: dict, ocr_evidence: dict = None, model: str = None) -> 
             f"论文证据中的代码链接：{ocr_evidence.get('code_urls', [])}"
         )
     else:
-        evidence_block = f"摘要（无 OCR 全文，多数实验配置可能未知）：\n{paper.get('summary', '')[:2000]}"
+        evidence_block = f"摘要（无文档解析，多数实验配置可能未知）：\n{paper.get('summary', '')[:2000]}"
 
     user_prompt = f"""论文标题：{paper.get('title', '')}
 
@@ -83,7 +83,7 @@ def run_extract_setup(
     paper = fetch_single_paper(paper_id)
     print(f"[setup] Title: {paper['title']}")
 
-    # OCR 全文（实验配置必须基于全文，否则抽不准）
+    # MinerU 文档解析（实验配置只基于实际取得的页面）
     ocr_evidence = None
     print("[setup] Running OCR on PDF...")
     try:
@@ -98,7 +98,7 @@ def run_extract_setup(
 
     print("[setup] Extracting experiment setup...")
     setup = extract_setup(paper, ocr_evidence=ocr_evidence, model=model)
-    setup["input_coverage"] = "OCR 全文（前20页）" if ocr_evidence else "仅摘要"
+    setup["input_coverage"] = "MinerU 文档解析（前20页）" if ocr_evidence else "仅摘要"
     setup["ocr_status"] = (ocr_evidence or {}).get("ocr_status", "failed")
 
     if dry_run:

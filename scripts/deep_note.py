@@ -230,7 +230,7 @@ def main():
     parser.add_argument("--from-reading", type=str, help="Path to reading.py output JSON")
     parser.add_argument("--output-dir", type=str, help="Output directory for markdown files")
     parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument("--use-ocr", action="store_true", help="Use PaddleOCR to extract full text from PDF")
+    parser.add_argument("--use-ocr", action="store_true", help="Use MinerU to parse the first configured PDF pages")
     args = parser.parse_args()
 
     run_deep_note(

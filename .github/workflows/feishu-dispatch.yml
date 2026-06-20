@@ -1,11 +1,29 @@
 name: Feishu Arxiv Dispatch
 
-# 由飞书 webhook（Cloudflare Worker）通过 GitHub repository_dispatch 触发：
-# 用户在飞书发送 arxiv 链接 → Worker 解析 → 这里跑 OCR + 抽取 → 结果卡片推回原会话。
+# 由飞书 webhook（腾讯云 SCF）通过 GitHub repository_dispatch 触发：
+# 用户在飞书发送 arxiv 链接 → SCF 解析 → 这里跑 MinerU + LLM → 结果卡片推回原会话。
 
 on:
   repository_dispatch:
     types: [arxiv-paper]
+  workflow_dispatch:
+    inputs:
+      arxiv_url:
+        description: 'Arxiv URL or paper ID (diagnostic replay)'
+        required: true
+        type: string
+      task:
+        description: 'Processing route'
+        required: true
+        default: setup
+        type: choice
+        options:
+          - setup
+          - reading
+      chat_id:
+        description: 'Feishu chat_id that receives the result'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -33,12 +51,12 @@ jobs:
           FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
           FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
           # 把结果推回发消息的那个会话（群或私聊都用 chat_id）
-          FEISHU_RECEIVE_ID: ${{ github.event.client_payload.chat_id }}
+          FEISHU_RECEIVE_ID: ${{ github.event.client_payload.chat_id || github.event.inputs.chat_id }}
           FEISHU_RECEIVE_ID_TYPE: chat_id
           MINERU_TOKEN: ${{ secrets.MINERU_TOKEN }}
           # 用 env 接收 payload，避免直接插值带来的命令注入
-          PAPER_URL: ${{ github.event.client_payload.url }}
-          PAPER_TASK: ${{ github.event.client_payload.task }}
+          PAPER_URL: ${{ github.event.client_payload.url || github.event.inputs.arxiv_url }}
+          PAPER_TASK: ${{ github.event.client_payload.task || github.event.inputs.task }}
         run: |
           if [ -z "$PAPER_URL" ]; then
             echo "No arxiv URL in dispatch payload"

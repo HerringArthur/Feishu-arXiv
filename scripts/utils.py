@@ -225,13 +225,14 @@ def build_digest_card(papers: list[dict]) -> dict:
         # 操作按钮
         issue_title = paper["title"][:80]
         issue_body = f"arxiv: {paper['abstract_url']}\n\n> {paper['digest_cn']}\n\n---\n点击 Submit 触发分析"
+        github_repo = os.environ.get("GITHUB_REPOSITORY") or os.environ.get("GITHUB_REPO") or "Estrellajer/arxiv-digest"
         reading_issue_url = (
-            f"https://github.com/Estrellajer/arxiv-digest/issues/new"
+            f"https://github.com/{github_repo}/issues/new"
             f"?title={urllib.parse.quote('[精读] ' + issue_title)}"
             f"&body={urllib.parse.quote(issue_body)}"
         )
         setup_issue_url = (
-            f"https://github.com/Estrellajer/arxiv-digest/issues/new"
+            f"https://github.com/{github_repo}/issues/new"
             f"?title={urllib.parse.quote('[实验配置] ' + issue_title)}"
             f"&body={urllib.parse.quote(issue_body)}"
         )
@@ -658,7 +659,7 @@ def ocr_arxiv_pdf(arxiv_url: str, output_dir: str = "output/ocr", download_image
 
 def extract_experiment_section(ocr_result: dict) -> str:
     """
-    从 OCR 全文 Markdown 中提取实验相关段落。
+    从 MinerU 返回的 Markdown 中提取实验相关段落。
     用启发式方法定位 Experiments / Results 部分。
     """
     if not ocr_result or not ocr_result.get("markdown"):

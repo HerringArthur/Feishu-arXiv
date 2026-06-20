@@ -16,6 +16,19 @@ import paper_context
 
 
 class WorkflowContractTests(unittest.TestCase):
+    def test_repository_contains_only_the_supported_scf_receiver(self):
+        self.assertFalse((ROOT / "feishu-worker").exists())
+        self.assertFalse((ROOT / "feishu-serverless/app.py").exists())
+        self.assertFalse((ROOT / "CLAUDE.md").exists())
+        self.assertTrue((ROOT / "feishu-serverless/index.py").exists())
+        self.assertTrue((ROOT / "feishu-serverless/core.py").exists())
+
+    def test_readme_documents_reuse_and_paddleocr_migration(self):
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        self.assertIn("为什么从 PaddleOCR 改为 MinerU", readme)
+        self.assertIn("10004 文件格式不支持", readme)
+        self.assertIn("Contents: Read and write", readme)
+        self.assertIn("index.main_handler", readme)
     def test_paper_analysis_has_issue_permission_and_enables_ocr(self):
         workflow = (ROOT / ".github/workflows/paper-analysis.yml").read_text(encoding="utf-8")
 
@@ -24,7 +37,7 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertNotIn("FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}", workflow)
         self.assertIn("d.get('quick_take'", workflow)
         self.assertNotIn("d.get('core_claim'", workflow)
-        # 改用 MinerU：精准解析用 MINERU_TOKEN，旧的 PaddleOCR Token 不再需要
+        # 文档解析使用 MinerU；旧 OCR Token 不再需要
         self.assertIn("MINERU_TOKEN: ${{ secrets.MINERU_TOKEN }}", workflow)
         self.assertNotIn("OCR_API_TOKEN", workflow)
 
@@ -33,9 +46,6 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("output/digest_analysis.json", workflow)
         self.assertIn("MINERU_TOKEN: ${{ secrets.MINERU_TOKEN }}", workflow)
         self.assertNotIn("OCR_API_TOKEN", workflow)
-
-    def test_cloudflare_worker_was_removed(self):
-        self.assertFalse((ROOT / "cloudflare-worker/index.js").exists())
 
     def test_experiment_setup_workflow_triggers_and_pushes(self):
         workflow = (ROOT / ".github/workflows/experiment-setup.yml").read_text(encoding="utf-8")
@@ -51,19 +61,15 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("repository_dispatch", workflow)
         self.assertIn("arxiv-paper", workflow)
         # 结果推回发消息的会话
-        self.assertIn("FEISHU_RECEIVE_ID: ${{ github.event.client_payload.chat_id }}", workflow)
+        self.assertIn("github.event.client_payload.chat_id || github.event.inputs.chat_id", workflow)
         # 关键词分流到精读 / 实验配置
         self.assertIn("scripts/extract_setup.py", workflow)
         self.assertIn("scripts/reading.py", workflow)
         self.assertIn("MINERU_TOKEN: ${{ secrets.MINERU_TOKEN }}", workflow)
-
-    def test_feishu_worker_handles_verification_and_dispatch(self):
-        worker = (ROOT / "feishu-worker/worker.js").read_text(encoding="utf-8")
-        self.assertIn("url_verification", worker)
-        self.assertIn("im.message.receive_v1", worker)
-        self.assertIn("/dispatches", worker)        # 调 GitHub repository_dispatch
-        self.assertIn("arxiv-paper", worker)         # event_type
-        self.assertIn("精读", worker)                # 关键词分流
+        # 可从 Actions 页面重放 payload，独立排除飞书 webhook 故障
+        self.assertIn("workflow_dispatch", workflow)
+        self.assertIn("github.event.inputs.arxiv_url", workflow)
+        self.assertIn("github.event.inputs.chat_id", workflow)
 
 
 class FeishuWebhookCoreTests(unittest.TestCase):
@@ -97,8 +103,11 @@ class FeishuWebhookCoreTests(unittest.TestCase):
                 "content": json.dumps({"text": "看下 https://arxiv.org/abs/2210.03629"}),
             }},
         }
-        core.handle_event(payload, {}, dispatch=lambda *a: calls.append(a))
+        status, body = core.handle_event(payload, {}, dispatch=lambda *a: calls.append(a))
         self.assertEqual(calls, [("https://arxiv.org/abs/2210.03629", "setup", "oc_1")])
+        self.assertEqual(status, 200)
+        self.assertTrue(body["dispatch_attempted"])
+        self.assertTrue(body["dispatch_ok"])
 
     def test_message_keyword_routes_to_reading_and_bare_id(self):
         core = self._core()
@@ -121,6 +130,25 @@ class FeishuWebhookCoreTests(unittest.TestCase):
             dispatch=lambda *a: None,
         )
         self.assertEqual(status, 403)
+
+    def test_dispatch_failure_is_observable(self):
+        core = self._core()
+        payload = {
+            "header": {"event_type": "im.message.receive_v1"},
+            "event": {"message": {
+                "chat_id": "oc_1", "message_type": "text",
+                "content": json.dumps({"text": "2210.03629"}),
+            }},
+        }
+
+        def fail(*_args):
+            raise RuntimeError("GitHub dispatch returned HTTP 403")
+
+        status, body = core.handle_event(payload, {}, dispatch=fail)
+        self.assertEqual(status, 502)
+        self.assertTrue(body["dispatch_attempted"])
+        self.assertFalse(body["dispatch_ok"])
+        self.assertIn("403", body["error"])
 
     @staticmethod
     def _scf_index():
@@ -255,11 +283,24 @@ class InstitutionAndEvidenceTests(unittest.TestCase):
         self.assertIn("实验配置", blob)  # 新增的实验配置抽取按钮
         self.assertIn("精读", blob)
 
+    def test_digest_issue_buttons_follow_the_fork_repository(self):
+        paper = {
+            "title": "Test", "abstract_url": "https://arxiv.org/abs/1", "authors": [],
+            "content_score": 0.7, "institution_bonus": 0.0, "final_score": 0.7,
+            "recognized_institutions": [], "code_url": None, "ocr_status": "success",
+            "decision": {}, "digest_cn": "M",
+        }
+        with patch.dict(os.environ, {"GITHUB_REPOSITORY": "someone/fork"}, clear=False):
+            card = utils.build_digest_card([paper])
+        blob = json.dumps(card, ensure_ascii=False)
+        self.assertIn("github.com/someone/fork/issues/new", blob)
+        self.assertNotIn("github.com/Estrellajer/arxiv-digest/issues/new", blob)
+
 
 class ExperimentSetupTests(unittest.TestCase):
     def test_setup_card_renders_all_sections(self):
         setup = {
-            "title": "ReAct", "input_coverage": "OCR 全文（前20页）",
+            "title": "ReAct", "input_coverage": "MinerU 文档解析（前20页）",
             "datasets": [{"name": "GSM8K", "split": "test", "size": "1319"}],
             "model": {"name": "PaLM", "architecture": "decoder", "params": "540B", "init_weights": "pretrained"},
             "hyperparameters": {"learning_rate": "1e-5", "batch_size": "32", "epochs_or_steps": "3", "optimizer": "Adam"},

@@ -173,7 +173,7 @@ def run_reading(
     paper = fetch_single_paper(paper_id)
     print(f"[reading] Title: {paper['title']}")
 
-    # OCR 全文提取实验部分
+    # MinerU 文档解析：提取首页与实验部分
     ocr_evidence = None
     if use_ocr:
         print("[reading] Running OCR on PDF...")
@@ -232,7 +232,7 @@ def main():
     parser.add_argument("--url", type=str, help="Arxiv URL")
     parser.add_argument("--id", type=str, help="Arxiv paper ID")
     parser.add_argument("--dry-run", action="store_true", help="Print without pushing to Feishu")
-    parser.add_argument("--use-ocr", action="store_true", help="Use PaddleOCR to extract full text from PDF")
+    parser.add_argument("--use-ocr", action="store_true", help="Use MinerU to parse the first configured PDF pages")
     parser.add_argument("--push-to-feishu", action="store_true", help="Push result via Feishu app API")
     args = parser.parse_args()
 

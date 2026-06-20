@@ -6,7 +6,7 @@
 只依赖标准库 + 同目录 core.py，无需安装 Flask 等第三方依赖（除非开启事件加密需 cryptography）。
 
 环境变量：
-  GITHUB_TOKEN               必填，具备 repository_dispatch 权限
+  GITHUB_TOKEN               必填，细粒度 PAT 需 Contents: Read and write；经典 PAT 需 repo scope
   GITHUB_REPO                必填，形如 "owner/repo"
   FEISHU_VERIFICATION_TOKEN  可选，事件订阅 Verification Token（校验来源）
   FEISHU_ENCRYPT_KEY         可选，开启事件加密时填（需 cryptography 依赖）
@@ -16,6 +16,7 @@ import base64
 import json
 import os
 import urllib.request
+import urllib.error
 
 import core
 
@@ -36,7 +37,14 @@ def _dispatch(url, task, chat_id):
             "User-Agent": "arxiv-feishu-bot",
         },
     )
-    urllib.request.urlopen(req, timeout=10)
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            if resp.status != 204:
+                raise RuntimeError(f"GitHub dispatch returned HTTP {resp.status}")
+            return resp.status
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:500]
+        raise RuntimeError(f"GitHub dispatch returned HTTP {exc.code}: {detail}") from exc
 
 
 def main_handler(event, context):

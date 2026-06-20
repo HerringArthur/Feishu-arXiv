@@ -1,8 +1,7 @@
 """
 飞书事件 webhook 的纯逻辑（仅依赖标准库，便于跨平台与单测）。
 
-被 app.py（Flask Web 函数）调用，可部署在阿里云函数计算 / 腾讯云 SCF 等国内 serverless，
-飞书国内入口可稳定访问。重活（OCR+LLM）不在这里做，而是触发 GitHub repository_dispatch
+被 index.py（腾讯云 SCF 事件函数）调用。重活（MinerU+LLM）不在这里做，而是触发 GitHub repository_dispatch
 交给 GitHub Actions，结果由 Actions 用飞书 app 推回原会话。
 """
 
@@ -77,6 +76,7 @@ def handle_event(payload, env: dict, dispatch, ack=None) -> tuple[int, dict]:
     if verification and token != verification:
         return 403, {"msg": "forbidden"}
 
+    response = {"code": 0, "dispatch_attempted": False}
     event_type = (payload.get("header") or {}).get("event_type") or (payload.get("event") or {}).get("type")
     if event_type == "im.message.receive_v1":
         message = (payload.get("event") or {}).get("message") or {}
@@ -90,6 +90,17 @@ def handle_event(payload, env: dict, dispatch, ack=None) -> tuple[int, dict]:
                     ack(chat_id, task, url)
                 except Exception:
                     pass
-            dispatch(url, task, chat_id)
+            response["dispatch_attempted"] = True
+            try:
+                dispatch(url, task, chat_id)
+            except Exception as exc:
+                return 502, {
+                    "code": 1,
+                    "dispatch_attempted": True,
+                    "dispatch_ok": False,
+                    "error": str(exc),
+                }
+            response["dispatch_ok"] = True
+            response["task"] = task
 
-    return 200, {"code": 0}
+    return 200, response
