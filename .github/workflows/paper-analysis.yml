@@ -1,8 +1,8 @@
-name: Paper Analysis (Reading + Deep Note)
+name: Paper Analysis (Issue Trigger)
 
 on:
-  repository_dispatch:
-    types: [paper_reading]
+  issues:
+    types: [opened]
 
   workflow_dispatch:
     inputs:
@@ -15,6 +15,8 @@ jobs:
   analyze:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # 只处理标题包含 [精读] 的 Issue
+    if: contains(github.event.issue.title, '[精读]') || github.event_name == 'workflow_dispatch'
 
     steps:
       - uses: actions/checkout@v4
@@ -27,17 +29,27 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Determine paper URL
+      - name: Extract arxiv URL from issue
         id: paper
         run: |
-          # From repository_dispatch payload OR workflow_dispatch input
-          if [ -n "${{ github.event.client_payload.arxiv_url }}" ]; then
-            echo "url=${{ github.event.client_payload.arxiv_url }}" >> $GITHUB_OUTPUT
-          elif [ -n "${{ github.event.inputs.arxiv_url }}" ]; then
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "url=${{ github.event.inputs.arxiv_url }}" >> $GITHUB_OUTPUT
           else
-            echo "No paper URL provided."
-            exit 1
+            # 从 Issue body 中提取 arxiv URL
+            BODY="${{ github.event.issue.body }}"
+            URL=$(echo "$BODY" | grep -oP 'https://arxiv\.org/abs/\S+' | head -1)
+            if [ -z "$URL" ]; then
+              URL=$(echo "$BODY" | grep -oP 'arxiv\.org/abs/\S+' | head -1)
+              if [ -n "$URL" ]; then
+                URL="https://$URL"
+              fi
+            fi
+            if [ -z "$URL" ]; then
+              echo "No arxiv URL found in issue body"
+              exit 1
+            fi
+            echo "url=$URL" >> $GITHUB_OUTPUT
+            echo "issue_number=${{ github.event.issue.number }}" >> $GITHUB_OUTPUT
           fi
 
       - name: Run paper-reading
@@ -46,38 +58,80 @@ jobs:
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
-          FEISHU_APP_ID: ${{ secrets.FEISHU_APP_ID }}
-          FEISHU_APP_SECRET: ${{ secrets.FEISHU_APP_SECRET }}
-          FEISHU_RECEIVE_ID: ${{ github.event.client_payload.receive_id || '' }}
+          FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
         run: |
-          python scripts/reading.py --url "${{ steps.paper.outputs.url }}" > reading_output.json
-          cat reading_output.json
+          python scripts/reading.py --url "${{ steps.paper.outputs.url }}" --push-to-feishu 2>&1 | tee reading_output.txt
 
-      - name: Check if worth deep reading
-        id: check
+      - name: Extract analysis JSON
+        id: extract
         run: |
-          PRIORITY=$(python -c "
-          import json
-          with open('reading_output.json') as f:
+          python -c "
+          import re, json, sys
+          with open('reading_output.txt', 'r') as f:
               text = f.read()
-          # Find JSON object
-          start = text.find('{')
-          end = text.rfind('}') + 1
-          if start >= 0 and end > start:
-              data = json.loads(text[start:end])
-              print(data.get('reading_priority', '可暂缓'))
+          # 找到包含 core_claim 的 JSON 对象
+          m = re.search(r'\{.*\"core_claim\".*\}', text, re.DOTALL)
+          if m:
+              try:
+                  data = json.loads(m.group())
+                  with open('analysis.json', 'w') as f2:
+                      json.dump(data, f2, ensure_ascii=False, indent=2)
+                  print(f'Verdict: {data.get(\"verdict\", \"\")}')
+                  print(f'Priority: {data.get(\"reading_priority\", \"\")}')
+              except json.JSONDecodeError:
+                  print('JSON parse error, saving raw')
+                  with open('analysis.json', 'w') as f2:
+                      f2.write(m.group())
           else:
-              print('可暂缓')
-          ")
-          echo "priority=$PRIORITY" >> $GITHUB_OUTPUT
-          echo "Reading priority: $PRIORITY"
+              print('No analysis JSON found')
+              sys.exit(1)
+          "
+
+      - name: Post comment on issue
+        if: steps.paper.outputs.issue_number != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERDICT=$(python -c "import json; d=json.load(open('analysis.json')); print(d.get('verdict','未知'))")
+          PRIORITY=$(python -c "import json; d=json.load(open('analysis.json')); print(d.get('reading_priority','可暂缓'))")
+          EVIDENCE=$(python -c "import json; d=json.load(open('analysis.json')); print(d.get('evidence_level','未知'))")
+          CLAIM=$(python -c "import json; d=json.load(open('analysis.json')); print(d.get('core_claim','')[:200])")
+
+          COMMENT=$(cat <<EOF
+          ## 📖 精读分析完成
+
+          **核心 Claim**: ${CLAIM}
+
+          **证据强度**: ${EVIDENCE}
+
+          **判定**: ${VERDICT}
+
+          **阅读优先级**: ${PRIORITY}
+
+          ---
+          完整结果已推送到飞书群。
+          EOF
+          )
+
+          gh issue comment ${{ steps.paper.outputs.issue_number }} --body "$COMMENT"
+
+      - name: Close issue
+        if: steps.paper.outputs.issue_number != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue close ${{ steps.paper.outputs.issue_number }} --reason "completed"
 
       - name: Run deep-note (if worth it)
-        if: steps.check.outputs.priority == '值得精读'
         env:
           LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
           LLM_BASE_URL: ${{ secrets.LLM_BASE_URL }}
           LLM_MODEL: ${{ secrets.LLM_MODEL }}
         run: |
-          echo "📝 Generating deep note..."
-          python scripts/deep_note.py --from-reading reading_output.json
+          PRIORITY=$(python -c "import json; d=json.load(open('analysis.json')); print(d.get('reading_priority','可暂缓'))")
+          if [ "$PRIORITY" = "值得精读" ]; then
+            echo "📝 Generating deep note..."
+            python scripts/deep_note.py --from-reading analysis.json
+          else
+            echo "Skipping deep note (priority: $PRIORITY)"
+          fi

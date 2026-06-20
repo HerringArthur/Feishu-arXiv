@@ -10,6 +10,7 @@ import hashlib
 import hmac
 import base64
 import urllib.request
+import urllib.parse
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -213,6 +214,14 @@ def build_digest_card(papers: list[dict]) -> dict:
         elements.append({"tag": "markdown", "content": paper_text})
 
         # 操作按钮
+        issue_title = paper["title"][:80]
+        issue_body = f"arxiv: {paper['abstract_url']}\n\n> {paper['digest_cn']}\n\n---\n点击 Submit 触发精读分析"
+        issue_url = (
+            f"https://github.com/Estrellajer/arxiv-digest/issues/new"
+            f"?title={urllib.parse.quote('[精读] ' + issue_title)}"
+            f"&body={urllib.parse.quote(issue_body)}"
+        )
+
         elements.append({
             "tag": "action",
             "actions": [
@@ -220,16 +229,7 @@ def build_digest_card(papers: list[dict]) -> dict:
                     "tag": "button",
                     "text": {"tag": "plain_text", "content": "📖 精读"},
                     "type": "primary",
-                    "value": json.dumps({
-                        "arxiv_id": paper["arxiv_id"],
-                        "arxiv_url": paper["abstract_url"],
-                        "title": paper["title"],
-                        "summary": paper["summary"],
-                    }),
-                    "confirm": {
-                        "title": {"tag": "plain_text", "content": "确认触发精读？"},
-                        "text": {"tag": "plain_text", "content": f"将对「{paper['title'][:50]}...」进行深度分析"}
-                    }
+                    "url": issue_url,
                 },
                 {
                     "tag": "button",

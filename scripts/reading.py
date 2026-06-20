@@ -185,6 +185,7 @@ def run_reading(
     dry_run: bool = False,
     model: str = None,
     use_ocr: bool = False,
+    push_to_feishu: bool = False,
 ):
     """Run decision-level reading for a paper."""
     if arxiv_url:
@@ -220,24 +221,31 @@ def run_reading(
         return analysis
 
     # Push result to Feishu
-    card = build_reading_result_card(analysis)
-    card_json = json.dumps(card, ensure_ascii=False)
-
-    # 从环境变量获取接收者 ID（先尝试 FEISHU_RECEIVE_ID，默认用 webhook）
-    receive_id = os.environ.get("FEISHU_RECEIVE_ID", "")
-    if receive_id:
-        ok = send_feishu_message(receive_id, "interactive", card_json)
+    if push_to_feishu:
+        from utils import send_feishu_card
+        card = build_reading_result_card(analysis)
+        webhook = os.environ.get("FEISHU_WEBHOOK", "")
+        if webhook:
+            ok = send_feishu_card(webhook, card)
+            if ok:
+                print("[reading] ✅ Result pushed to Feishu webhook")
+            else:
+                print("[reading] ❌ Failed to push to Feishu webhook")
+        else:
+            print("[reading] FEISHU_WEBHOOK not set. Printing result:")
+            print(json.dumps(analysis, ensure_ascii=False, indent=2))
     else:
-        # Fallback: print result
-        print("[reading] FEISHU_RECEIVE_ID not set. Printing result:")
-        print(json.dumps(analysis, ensure_ascii=False, indent=2))
-        ok = True
+        # Try send via app API
+        card = build_reading_result_card(analysis)
+        card_json = json.dumps(card, ensure_ascii=False)
+        receive_id = os.environ.get("FEISHU_RECEIVE_ID", "")
+        if receive_id:
+            ok = send_feishu_message(receive_id, "interactive", card_json)
+        else:
+            print("[reading] FEISHU_RECEIVE_ID not set. Printing result:")
+            print(json.dumps(analysis, ensure_ascii=False, indent=2))
 
-    if ok:
-        print(f"[reading] ✅ Result sent")
-    else:
-        print("[reading] ❌ Failed to send result")
-
+    print(json.dumps(analysis, ensure_ascii=False))  # always print JSON for downstream
     return analysis
 
 
@@ -247,6 +255,7 @@ def main():
     parser.add_argument("--id", type=str, help="Arxiv paper ID")
     parser.add_argument("--dry-run", action="store_true", help="Print without pushing to Feishu")
     parser.add_argument("--use-ocr", action="store_true", help="Use PaddleOCR to extract full text from PDF")
+    parser.add_argument("--push-to-feishu", action="store_true", help="Push result via Feishu webhook")
     args = parser.parse_args()
 
     if not args.url and not args.id:
@@ -258,6 +267,7 @@ def main():
         arxiv_url=args.url,
         dry_run=args.dry_run,
         use_ocr=args.use_ocr,
+        push_to_feishu=args.push_to_feishu,
     )
 
 
