@@ -67,13 +67,7 @@ jobs:
         run: |
           if [ -f output/analysis.json ]; then
             cp output/analysis.json analysis.json
-            python -c "
-            import json
-            with open('analysis.json') as f:
-                data = json.load(f)
-            print(f'Verdict: {data.get(\"verdict\", \"\")}')
-            print(f'Priority: {data.get(\"reading_priority\", \"\")}')
-            "
+            python -c "import json; d=json.load(open('analysis.json')); print(f'Verdict: {d.get(\"verdict\",\"?\")}'); print(f'Priority: {d.get(\"reading_priority\",\"?\")}')"
           else
             echo "No analysis JSON found"
             exit 1
