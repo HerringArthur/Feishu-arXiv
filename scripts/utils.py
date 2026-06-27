@@ -105,9 +105,11 @@ def fetch_arxiv_papers(
     """
     cat_str = "+OR+".join(f"cat:{c}" for c in categories)
 
-    # 计算日期范围
+    # 计算日期范围（按日历天数比较，避免周末/时区导致空窗）
     end_date = datetime.now(timezone.utc)
     start_date = end_date - timedelta(days=lookback_days)
+    print(f"[fetch] Querying arxiv: {categories}, lookback={lookback_days}d, "
+          f"date range: {start_date.date()} – {end_date.date()}")
 
     # arxiv API 的 sortBy=submittedDate 和 sortOrder=descending
     query = f"({cat_str})"
@@ -152,11 +154,11 @@ def fetch_arxiv_papers(
 
         published = published_el.text if published_el is not None else ""
 
-        # 只保留日期范围内的
+        # 只保留日期范围内的（按日历日期比较，避免周末/时区导致空窗）
         if published:
             try:
                 pub_date = datetime.fromisoformat(published.replace("Z", "+00:00"))
-                if pub_date < start_date:
+                if pub_date.date() < start_date.date():
                     continue
             except (ValueError, TypeError):
                 pass  # 无法解析日期则保留
@@ -171,6 +173,7 @@ def fetch_arxiv_papers(
             "published": published,
         })
 
+    print(f"[fetch] {len(papers)} papers passed date filter (published >= {start_date.date()})")
     return papers
 
 
@@ -182,7 +185,10 @@ def send_feishu_card(webhook_url: str, card: dict) -> bool:
     try:
         resp = httpx.post(webhook_url, json=payload, timeout=15)
         result = resp.json()
-        return result.get("code") == 0
+        ok = result.get("code") == 0
+        if not ok:
+            print(f"[feishu webhook error] HTTP {resp.status_code}, response: {result}")
+        return ok
     except Exception as e:
         print(f"[feishu webhook error] {e}")
         return False

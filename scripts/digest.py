@@ -13,6 +13,7 @@ import os
 import sys
 import json
 import argparse
+from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # Add parent dir to path for GitHub Actions
@@ -29,6 +30,44 @@ from utils import (
 from paper_context import (
     apply_institution_bonus, build_ocr_evidence, load_prompt,
 )
+
+
+def save_digest_analysis(papers: list[dict]):
+    os.makedirs("output", exist_ok=True)
+    with open("output/digest_analysis.json", "w", encoding="utf-8") as f:
+        json.dump(papers, f, ensure_ascii=False, indent=2)
+
+
+def build_digest_status_card(title: str, details: list[str]) -> dict:
+    today = datetime.now().strftime("%Y-%m-%d")
+    content = f"**Arxiv 每日速递 — {today}**\n{title}"
+    if details:
+        content += "\n\n" + "\n".join(f"- {item}" for item in details)
+    return {
+        "header": {
+            "title": {"tag": "plain_text", "content": "Arxiv 每日速递"},
+            "template": "blue",
+        },
+        "elements": [{"tag": "markdown", "content": content}],
+    }
+
+
+def notify_digest_status(title: str, details: list[str], webhook_url: str | None = None, dry_run: bool = False):
+    card = build_digest_status_card(title, details)
+    if dry_run:
+        print("\n[DRY RUN] Would send status card:")
+        print(json.dumps(card, ensure_ascii=False, indent=2).encode("utf-8", errors="replace").decode("utf-8"))
+        return
+
+    webhook = webhook_url or os.environ.get("FEISHU_WEBHOOK", "")
+    if not webhook:
+        print("[digest] FEISHU_WEBHOOK not set. Status card not sent.")
+        return
+
+    if send_feishu_card(webhook, card):
+        print("[digest] Sent status card to Feishu")
+    else:
+        print("[digest] Failed to send status card to Feishu")
 
 
 # ─── Scoring (保守打分) ───────────────────────────────────────────────────────
@@ -224,7 +263,7 @@ def run_digest(
     keywords: list[str],
     threshold: float = 0.75,
     max_papers: int = 10,
-    lookback_days: int = 1,
+    lookback_days: int = 2,
     dry_run: bool = False,
     webhook_url: str = None,
     scoring_model: str = None,
@@ -248,6 +287,16 @@ def run_digest(
 
     if not papers:
         print("[digest] No papers found in the lookback window. Skipping.")
+        save_digest_analysis([])
+        notify_digest_status(
+            "今日没有抓到 lookback 窗口内的新论文。",
+            [
+                f"Categories: {', '.join(categories)}",
+                f"Lookback: {lookback_days} day(s)",
+            ],
+            webhook_url=webhook_url,
+            dry_run=dry_run,
+        )
         return
 
     # Step 2: Score
@@ -258,9 +307,7 @@ def run_digest(
         prefilter_threshold=ocr_prefilter_threshold,
         institution_bonus_max=institution_bonus_max,
     )
-    os.makedirs("output", exist_ok=True)
-    with open("output/digest_analysis.json", "w", encoding="utf-8") as f:
-        json.dump(scored, f, ensure_ascii=False, indent=2)
+    save_digest_analysis(scored)
 
     high_score = [p for p in scored if p.get("final_score", 0) >= threshold]
     high_score.sort(key=lambda p: p.get("score", 0), reverse=True)
@@ -272,6 +319,15 @@ def run_digest(
         for p in top5:
             print(f"  [{p['score']:.2f}] {p['title'][:80]}")
         print("[digest] Nothing to push. Done.")
+        notify_digest_status(
+            f"今日没有论文达到推送阈值 {threshold:.2f}。",
+            [
+                f"Fetched: {len(scored)} paper(s)",
+                *[f"{p['score']:.2f} - {p['title'][:80]}" for p in top5],
+            ],
+            webhook_url=webhook_url,
+            dry_run=dry_run,
+        )
         return
 
     print(f"[digest] {len(high_score)} papers passed threshold. Top 3:")
@@ -280,8 +336,7 @@ def run_digest(
 
     # Step 3: Chinese digest
     high_score = generate_digests(high_score, model=digest_model)
-    with open("output/digest_analysis.json", "w", encoding="utf-8") as f:
-        json.dump(scored, f, ensure_ascii=False, indent=2)
+    save_digest_analysis(scored)
 
     # Step 4: Build card & push
     card = build_digest_card(high_score)
@@ -329,7 +384,7 @@ def main():
     keywords = args.keywords.split(",") if args.keywords else config.get("keywords", [])
     threshold = args.threshold if args.threshold is not None else config.get("threshold", 0.75)
     max_papers = args.max_papers if args.max_papers is not None else config.get("max_papers", 10)
-    lookback = args.lookback if args.lookback is not None else config.get("lookback_days", 1)
+    lookback = args.lookback if args.lookback is not None else config.get("lookback_days", 2)
 
     scoring_model = config.get("scoring_model") or os.environ.get("LLM_SCORING_MODEL")
     digest_model = config.get("digest_model") or os.environ.get("LLM_MODEL")

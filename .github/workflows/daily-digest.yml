@@ -2,7 +2,7 @@ name: Daily Arxiv Digest
 
 on:
   schedule:
-    - cron: '0 22 * * *'
+    - cron: '17 22 * * *'
   workflow_dispatch:
     inputs:
       categories:
@@ -20,7 +20,7 @@ on:
       lookback:
         description: 'Lookback days'
         required: false
-        default: '1'
+        default: '2'
 
 jobs:
   digest:
@@ -46,7 +46,7 @@ jobs:
             --categories "${{ github.event.inputs.categories || 'cs.CL,cs.AI,cs.LG' }}" \
             --keywords "${{ github.event.inputs.keywords || '' }}" \
             --threshold "${{ github.event.inputs.threshold || '0.75' }}" \
-            --lookback "${{ github.event.inputs.lookback || '1' }}"
+            --lookback "${{ github.event.inputs.lookback || '2' }}"
 
       - name: Upload digest analysis
         if: always()

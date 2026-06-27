@@ -30,8 +30,8 @@ threshold: 0.75
 # 每天最多推送篇数
 max_papers: 10
 
-# 查询天数（查最近 N 天的新论文）
-lookback_days: 1
+# 查询天数（查最近 N 天的新论文，2 天以覆盖周末空窗）
+lookback_days: 2
 
 # 两阶段 OCR 与机构加分
 ocr_prefilter_threshold: 0.45
