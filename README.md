@@ -70,7 +70,7 @@ arXiv API
    - `ocr_candidate_limit`：每天最多解析多少篇候选。
    - `institution_bonus_max`：机构加分上限。
 
-定时任务定义在 [`.github/workflows/daily-digest.yml`](.github/workflows/daily-digest.yml)，默认 `22:00 UTC`，即北京时间次日 `06:00`。
+定时任务定义在 [`.github/workflows/daily-digest.yml`](.github/workflows/daily-digest.yml)，默认 `22:17 UTC`，即北京时间次日 `06:17`。GitHub Actions 的整点调度容易延迟或被丢弃，因此避开 `:00`。
 
 ### 2. 配置 LLM
 

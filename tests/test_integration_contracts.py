@@ -45,6 +45,7 @@ class WorkflowContractTests(unittest.TestCase):
         workflow = (ROOT / ".github/workflows/daily-digest.yml").read_text(encoding="utf-8")
         self.assertIn("output/digest_analysis.json", workflow)
         self.assertIn("MINERU_TOKEN: ${{ secrets.MINERU_TOKEN }}", workflow)
+        self.assertIn("cron: '17 22 * * *'", workflow)
         self.assertNotIn("OCR_API_TOKEN", workflow)
 
     def test_experiment_setup_workflow_triggers_and_pushes(self):
@@ -249,6 +250,64 @@ class InstitutionAndEvidenceTests(unittest.TestCase):
         self.assertEqual(result[0]["ocr_status"], "failed")
         self.assertEqual(result[0]["final_score"], 0.7)
         build.assert_not_called()
+
+    @patch("digest.send_feishu_card", return_value=True)
+    @patch("digest.fetch_arxiv_papers", return_value=[])
+    def test_digest_notifies_feishu_when_no_papers_found(self, _fetch, send):
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            try:
+                os.chdir(tmp)
+                digest.run_digest(
+                    categories=["cs.CL"],
+                    keywords=["agent"],
+                    webhook_url="https://example.test/webhook",
+                )
+                analysis = json.loads(Path("output/digest_analysis.json").read_text(encoding="utf-8"))
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(analysis, [])
+        self.assertTrue(send.called)
+        card = send.call_args.args[1]
+        self.assertIn("今日没有抓到", json.dumps(card, ensure_ascii=False))
+
+    @patch("digest.send_feishu_card", return_value=True)
+    @patch("digest.enrich_with_ocr")
+    @patch("digest.score_papers")
+    @patch("digest.fetch_arxiv_papers")
+    def test_digest_notifies_feishu_when_no_paper_passes_threshold(self, fetch, score, enrich, send):
+        paper = {
+            "title": "Low score paper",
+            "summary": "abstract",
+            "arxiv_id": "1",
+            "abstract_url": "https://arxiv.org/abs/1",
+            "authors": [],
+            "published": "2026-06-27T00:00:00Z",
+        }
+        scored = {**paper, "content_score": 0.1, "score": 0.1, "final_score": 0.1}
+        fetch.return_value = [paper]
+        score.return_value = [scored]
+        enrich.return_value = [scored]
+
+        old_cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as tmp:
+            try:
+                os.chdir(tmp)
+                digest.run_digest(
+                    categories=["cs.CL"],
+                    keywords=["agent"],
+                    threshold=0.75,
+                    webhook_url="https://example.test/webhook",
+                )
+                analysis = json.loads(Path("output/digest_analysis.json").read_text(encoding="utf-8"))
+            finally:
+                os.chdir(old_cwd)
+
+        self.assertEqual(analysis[0]["final_score"], 0.1)
+        self.assertTrue(send.called)
+        card = send.call_args.args[1]
+        self.assertIn("今日没有论文达到推送阈值", json.dumps(card, ensure_ascii=False))
 
     def test_digest_card_exposes_score_components_and_coverage(self):
         paper = {
