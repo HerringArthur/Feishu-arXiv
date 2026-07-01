@@ -12,7 +12,8 @@ keywords:
   - agentic rl
   - reasoning
   - Post-training
-  - on-policy distillation
+  - exploration rl
+  - entropy
 
 # 打分阈值：只推送分数 >= threshold 的论文（0-1，推荐 0.75）
 threshold: 0.75
@@ -31,5 +32,5 @@ lookback_days: 2
 
 # 两阶段 OCR 与机构加分
 ocr_prefilter_threshold: 0.45
-ocr_candidate_limit: 20
+ocr_candidate_limit: 50
 institution_bonus_max: 0.08
