@@ -2,7 +2,7 @@ name: Daily Arxiv Digest
 
 on:
   schedule:
-    - cron: '55 15 * * *'
+    - cron: '58 15 * * *'
   workflow_dispatch:
     inputs:
       categories:
