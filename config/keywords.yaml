@@ -16,7 +16,7 @@ keywords:
   - entropy
 
 # 打分阈值：只推送分数 >= threshold 的论文（0-1，推荐 0.75）
-threshold: 0.75
+threshold: 0.1
 
 # LLM 打分时使用的模型（可选覆盖 GitHub Secrets 中的 LLM_MODEL）
 # scoring_model: "gpt-4o-mini"
